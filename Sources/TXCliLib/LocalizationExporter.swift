@@ -134,6 +134,8 @@ public class LocalizationExporter {
         process.standardOutput = outputPipe
         process.standardError = errorPipe
         
+        logHandler?.verbose("About to run xcodebuild...")
+
         do {
             try process.run()
         }
@@ -145,10 +147,36 @@ Error executing xcodebuild:
             return nil
         }
 
+        logHandler?.verbose("Running xcodebuild returned.")
+
         // We need to block until we read the output pipe data so that we wait
         // for the xcodebuild command to finish executing.
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        var outputData: Data?
+        var errorData: Data?
+
+        if #available(macOS 10.15.4, *) {
+            do {
+                outputData = try outputPipe.fileHandleForReading.readToEnd()
+            }
+            catch {
+                logHandler?.error("""
+Error reading to end of output pipe:
+\(error)
+""")
+            }
+            do {
+                errorData = try errorPipe.fileHandleForReading.readToEnd()
+            }
+            catch {
+                logHandler?.error("""
+Error reading to end of error pipe:
+\(error)
+""")
+            }
+        } else {
+            outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        }
 
         // We log the output and error pipes when verbose logging is enabled,
         // but we treat the errors that might have been generated during
@@ -161,22 +189,24 @@ Error executing xcodebuild:
         //
         // We only trigger a failure if the generated directories or files do
         // not exist.
-        let output = String(decoding: outputData, as: UTF8.self)
-
-        if output.count > 0 {
-            logHandler?.verbose("""
+        if let outputData = outputData {
+           let output = String(decoding: outputData, as: UTF8.self)
+            if output.count > 0 {
+                logHandler?.verbose("""
 [warn]xcodebuild output:[end]
 [warn]\(output.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines))[end]
 """)
+            }
         }
 
-        let error = String(decoding: errorData, as: UTF8.self)
-
-        if error.count > 0 {
-            logHandler?.verbose("""
+        if let errorData = errorData {
+            let error = String(decoding: errorData, as: UTF8.self)
+            if error.count > 0 {
+                logHandler?.verbose("""
 xcodebuild error:
 \(error.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines))
 """)
+            }
         }
         
         let xclocFilename = sourceLocale + "." + LocalizationExporter.XCLOC_EXTENSION
